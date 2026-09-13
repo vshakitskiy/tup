@@ -3,7 +3,8 @@
 -include_lib("kernel/include/file.hrl").
 
 -export([parent/0, exit_with/1, gleam_error/1, erlang_term_to_string/1, parse_address/1, unlink_stale_socket/1, read_file/1,
-         child_pid/2, terminate_child/2, restart_child/2, active_children/1, monotonic_milliseconds/0]).
+         child_pid/2, terminate_child/2, restart_child/2, active_children/1,
+         trapping_exits/1]).
 
 parent() -> 
   {parent, Pid} = erlang:process_info(self(), parent), 
@@ -108,4 +109,20 @@ active_children(Supervisor) ->
     exit:_Reason -> {error, nil}
   end.
 
-monotonic_milliseconds() -> erlang:monotonic_time(millisecond).
+trapping_exits(Start) ->
+  Trapping = process_flag(trap_exit, true),
+  try Start()
+  after
+    process_flag(trap_exit, Trapping),
+    case Trapping of
+      true -> ok;
+      false -> replay_exits()
+    end
+  end.
+
+replay_exits() ->
+  receive
+    {'EXIT', _Pid, normal} -> replay_exits();
+    {'EXIT', _Pid, Reason} -> exit(Reason)
+  after 0 -> ok
+  end.

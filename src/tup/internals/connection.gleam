@@ -205,19 +205,10 @@ pub fn start_worker(argument: Argument(user_state, user_message)) {
                 |> actor.continue
                 |> actor.with_selector(selector)
               }
-              _local, _peer ->
-                "Failed to retrive the sockname and peername during initialisation"
-                |> dynamic.string
-                |> exit
+              _local, _peer -> stop_before_ready(transport, socket)
             }
           }
-          Error(error) ->
-            {
-              "Failed to establish the TLS handshake: "
-              <> socket.error_to_string(error)
-            }
-            |> dynamic.string
-            |> exit
+          Error(_error) -> stop_before_ready(transport, socket)
         }
       }
       Initialised(..), AcceptorDown(_down) -> actor.stop()
@@ -339,6 +330,14 @@ fn parent() -> process.Pid
 // caller needs.
 @external(erlang, "tup_ffi", "exit_with")
 fn exit(reason: dynamic.Dynamic) -> actor.Next(state, message)
+
+fn stop_before_ready(
+  transport: socket.Transport,
+  socket: socket.Socket,
+) -> actor.Next(state, message) {
+  let _closed = socket.close(transport, socket)
+  actor.stop()
+}
 
 fn exit_reason_to_dynamic(reason: process.ExitReason) -> dynamic.Dynamic {
   case reason {

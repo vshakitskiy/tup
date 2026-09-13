@@ -10,8 +10,7 @@ pub fn main() -> Nil {
 
   let name = process.new_name("tup")
 
-  let assert Ok(_started) =
-    tup.new(
+  echo tup.new(
       on_init: fn(_connection, selector) { #(1, selector) },
       handler: fn(connection, state, message) {
         panic
@@ -35,11 +34,6 @@ pub fn main() -> Nil {
     |> tup.named(name)
     |> tup.listening(on: tup.Tcp(interface: "127.0.0.1", port: 3000))
     |> tup.start
-
-  echo tup.listen_endpoint(name, within: 1000)
-
-  // let subject = process.receive_forever(subject)
-  // process.send(subject, 10_278)
 
   process.sleep_forever()
 }

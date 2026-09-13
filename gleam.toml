@@ -15,7 +15,8 @@ extra_applications = ["ssl", "public_key"]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
 gleam_erlang = ">= 1.3.0 and < 2.0.0"
 gleam_otp = ">= 1.3.0 and < 2.0.0"
-relay_supervisor = ">= 1.0.0-rc1 and < 2.0.0"
+# relay_supervisor = ">= 1.0.0-rc1 and < 2.0.0"
+relay_supervisor = { path = "../relay-supervisor" }
 logging = ">= 1.5.0 and < 2.0.0"
 exception = ">= 2.1.1 and < 3.0.0"
 

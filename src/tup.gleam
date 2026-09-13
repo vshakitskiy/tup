@@ -1,3 +1,6 @@
+//// A TCP and TLS server. Describe it with `new` and the builder functions,
+//// then run it with `start` or hand it to a supervisor with `supervised`.
+
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/erlang/process
@@ -25,6 +28,12 @@ pub type IpAddress {
   Ipv6(Int, Int, Int, Int, Int, Int, Int, Int)
 }
 
+/// Formats an address as text.
+///
+/// ```gleam
+/// tup.ip_address_to_string(Ipv4(127, 0, 0, 1))
+/// // -> "127.0.0.1"
+/// ```
 pub fn ip_address_to_string(address: IpAddress) {
   to_socket_ip_address(address)
   |> socket.ip_address_to_string
@@ -33,7 +42,7 @@ pub fn ip_address_to_string(address: IpAddress) {
 /// Extracts the IPv4 address inside an IPv4 mapped IPv6 address.
 /// 
 /// ```gleam
-/// unmap_ipv4(Ipv6(0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001))
+/// tup.unmap_ipv4(Ipv6(0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001))
 /// // -> Ipv4(127, 0, 0, 1)
 /// ```
 pub fn unmap_ipv4(address: IpAddress) -> IpAddress {
@@ -49,6 +58,7 @@ pub fn unmap_ipv4(address: IpAddress) -> IpAddress {
   }
 }
 
+/// Converts a `socket.IpAddress` into an `IpAddress`.
 fn from_socket_ip_address(address: socket.IpAddress) {
   case address {
     socket.Ipv4(a, b, c, d) -> Ipv4(a, b, c, d)
@@ -56,6 +66,7 @@ fn from_socket_ip_address(address: socket.IpAddress) {
   }
 }
 
+/// Converts an `IpAddress` into a `socket.IpAddress`.
 fn to_socket_ip_address(address: IpAddress) {
   case address {
     Ipv4(a, b, c, d) -> socket.Ipv4(a, b, c, d)
@@ -63,6 +74,8 @@ fn to_socket_ip_address(address: IpAddress) {
   }
 }
 
+/// An accepted client connection handed to every callback. Write to it with
+/// `send` and look up either end of it with `peer` and `local`.
 pub opaque type Connection {
   Connection(
     transport: socket.Transport,
@@ -72,6 +85,7 @@ pub opaque type Connection {
   )
 }
 
+/// Converts an internal connection into a `Connection`.
 fn from_internal_connection(connection: connection.Connection) -> Connection {
   case connection {
     connection.Connection(transport:, socket:, local:, peer:) ->
@@ -84,10 +98,17 @@ fn from_internal_connection(connection: connection.Connection) -> Connection {
   }
 }
 
+/// The transport and the socket behind a connection.
+///
+/// ```gleam
+/// let #(transport, socket) = tup.socket(connection)
+/// socket.send(transport, socket, data)
+/// ```
 pub fn socket(connection: Connection) {
   #(connection.transport, connection.socket)
 }
 
+/// One end of a connection.
 pub type Endpoint {
   /// An address and a port on a TCP socket.
   TcpEndpoint(ip_address: IpAddress, port: Int)
@@ -95,11 +116,19 @@ pub type Endpoint {
   UnixEndpoint(path: String)
 }
 
+/// Formats an endpoint as text: the address and port of a TCP endpoint or
+/// the path of a Unix one.
+///
+/// ```gleam
+/// tup.endpoint_to_string(TcpEndpoint(Ipv4(127, 0, 0, 1), 3000))
+/// // -> "127.0.0.1:3000"
+/// ```
 pub fn endpoint_to_string(endpoint: Endpoint) {
   to_socket_endpoint(endpoint)
   |> socket.endpoint_to_string
 }
 
+/// Converts a `socket.Endpoint` into an `Endpoint`.
 fn from_socket_endpoint(endpoint: socket.Endpoint) -> Endpoint {
   case endpoint {
     socket.TcpEndpoint(ip_address:, port:) ->
@@ -108,6 +137,7 @@ fn from_socket_endpoint(endpoint: socket.Endpoint) -> Endpoint {
   }
 }
 
+/// Converts an `Endpoint` into a `socket.Endpoint`.
 fn to_socket_endpoint(endpoint: Endpoint) -> socket.Endpoint {
   case endpoint {
     TcpEndpoint(ip_address:, port:) ->
@@ -116,36 +146,89 @@ fn to_socket_endpoint(endpoint: Endpoint) -> socket.Endpoint {
   }
 }
 
+/// The client's end of a connection.
+///
+/// ```gleam
+/// tup.peer(connection)
+/// // -> TcpEndpoint(Ipv4(192, 168, 1, 20), 51234)
+/// ```
 pub fn peer(connection: Connection) {
   connection.peer
 }
 
+/// The server's end of a connection.
+///
+/// ```gleam
+/// tup.local(connection)
+/// // -> TcpEndpoint(Ipv4(127, 0, 0, 1), 3000)
+/// ```
 pub fn local(connection: Connection) {
   connection.local
 }
 
+/// Sends data to the client. Returns the socket error when the write fails.
+///
+/// ```gleam
+/// tup.send(connection, bytes_tree.from_string("hello\n"))
+/// // -> Ok(Nil)
+/// ```
 pub fn send(connection: Connection, data: bytes_tree.BytesTree) {
   socket.send(connection.transport, connection.socket, data)
 }
 
+/// Describes a socket error as text.
+///
+/// ```gleam
+/// case tup.send(connection, data) {
+///   Ok(Nil) -> Nil
+///   Error(error) -> io.println(socket_error_to_string(error))
+/// }
+/// ```
 pub fn socket_error_to_string(error: socket.SocketError) {
   socket.error_to_string(error)
 }
 
+/// What a connection does once the handler has run. Build one with
+/// `continue`, `stop` or `stop_abnormal`.
 pub opaque type Next(user_state, user_message) {
+  /// Keep the connection open with `state`, optionally with a new selector
+  /// or active state.
   Continue(
     state: user_state,
     selector: option.Option(process.Selector(user_message)),
     active_state: option.Option(socket.ActiveState),
   )
+  /// Close the connection.
   NormalStop
+  /// Close the connection and exit abnormally with `reason`.
   AbnormalStop(reason: String)
 }
 
+/// Keeps the connection open and carries `state` into the next message.
+///
+/// ```gleam
+/// fn handler(_connection, count, message) {
+///   case message {
+///     Incoming(_data) -> tup.continue(count + 1)
+///     User(_message) -> tup.continue(count)
+///   }
+/// }
+/// ```
 pub fn continue(state: user_state) {
   Continue(state:, selector: option.None, active_state: option.None)
 }
 
+/// Sets the selector the connection receives user messages on from now on. Has 
+/// no effect on a stop.
+///
+/// ```gleam
+/// let selector =
+///   process.new_selector()
+///   |> process.select(subject)
+///
+/// tup.continue(state)
+/// |> tup.with_selector(selector)
+/// ```
 pub fn with_selector(
   next: Next(user_state, user_message),
   selector: process.Selector(user_message),
@@ -156,6 +239,12 @@ pub fn with_selector(
   }
 }
 
+/// Sets the socket's active state from now on. Has no effect on a stop.
+///
+/// ```gleam
+/// tup.continue(state)
+/// |> tup.with_active_state(Count(10))
+/// ```
 pub fn with_active_state(
   next: Next(user_state, user_message),
   active_state: ActiveState,
@@ -170,14 +259,28 @@ pub fn with_active_state(
   }
 }
 
+/// Closes the connection.
+///
+/// ```gleam
+/// case message {
+///   Incoming(<<"quit\n">>) -> tup.stop()
+///   _message -> tup.continue(state)
+/// }
+/// ```
 pub fn stop() {
   NormalStop
 }
 
+/// Closes the connection and exits abnormally with `reason`.
+///
+/// ```gleam
+/// tup.stop_abnormal("client sent an invalid frame")
+/// ```
 pub fn stop_abnormal(reason: String) {
   AbnormalStop(reason:)
 }
 
+/// Converts a `Next` into the internal representation.
 fn to_internal_next(
   next: Next(user_state, user_message),
 ) -> connection.Next(user_state, user_message) {
@@ -189,11 +292,15 @@ fn to_internal_next(
   }
 }
 
+/// A message delivered to the handler.
 pub type Message(user_message) {
+  /// Bytes read from the socket.
   Incoming(BitArray)
+  /// A message picked up by the connection's selector.
   User(user_message)
 }
 
+/// Converts an internal handler message into a `Message`.
 fn from_internal_message(
   message: connection.HandlerMessage(user_message),
 ) -> Message(user_message) {
@@ -203,15 +310,20 @@ fn from_internal_message(
   }
 }
 
+/// The type a server's `process.Name` is tagged with.
 pub type Server
 
 /// How long connections get to finish their work once the server starts
 /// shutting down.
 type ShutdownTimeout {
+  /// Kill whatever is still running after this many milliseconds.
   ShutdownAfter(milliseconds: Int)
+  /// Wait for every connection, however long it takes.
   ShutdownNever
 }
 
+/// A server being described. Start from `new`, adjust it with the builder
+/// functions and hand it to `start` or `supervised`.
 pub opaque type Builder(user_state, user_message) {
   Builder(
     address: Address,
@@ -225,6 +337,36 @@ pub opaque type Builder(user_state, user_message) {
   )
 }
 
+/// Creates a builder from the callbacks every connection runs.
+///
+/// `on_init` runs once the connection is accepted. It receives the connection
+/// and a selector and returns the initial state together with the selector
+/// user messages are received on. 
+/// 
+/// `handler` runs for every `Message` and returns what the connection does next. 
+/// 
+/// `on_close` runs once the connection has ended.
+///
+/// By default the server listens on 127.0.0.1 port 3000 over plain TCP, starts 
+/// every connection in the `Once` active state, runs 20 acceptors and gives
+/// connections 15 seconds to finish on shutdown. Each of these can be changed 
+/// with the builder function.
+///
+/// ```gleam
+/// tup.new(
+///   on_init: fn(_connection, selector) { #(0, selector) },
+///   handler: fn(connection, count, message) {
+///     case message {
+///       Incoming(data) -> {
+///         let _ = tup.send(connection, bytes_tree.from_bit_array(data))
+///         tup.continue(count + 1)
+///       }
+///       User(_message) -> tup.continue(count)
+///     }
+///   },
+///   on_close: fn(_count) { Nil },
+/// )
+/// ```
 pub fn new(
   on_init on_init: fn(Connection, process.Selector(user_message)) ->
     #(user_state, process.Selector(user_message)),
@@ -257,6 +399,13 @@ pub fn new(
   )
 }
 
+/// How many acceptors wait for connections at once. Defaults to 20. Must be
+/// greater than zero.
+///
+/// ```gleam
+/// builder
+/// |> tup.pool_size(100)
+/// ```
 pub fn pool_size(builder: Builder(user_state, user_message), pool_size: Int) {
   Builder(..builder, pool_size:)
 }
@@ -265,6 +414,11 @@ pub fn pool_size(builder: Builder(user_state, user_message), pool_size: Int) {
 /// it is killed. A connection still running at the deadline is killed without
 /// `on_shutdown` or `on_close` completing. Defaults to 15 seconds. Must not be
 /// negative.
+///
+/// ```gleam
+/// builder
+/// |> tup.shutdown_timeout(5000)
+/// ```
 pub fn shutdown_timeout(
   builder: Builder(user_state, user_message),
   milliseconds: Int,
@@ -275,6 +429,11 @@ pub fn shutdown_timeout(
 /// Wait for every connection to finish when the server shuts down, however
 /// long that takes. A connection that never finishes keeps the shutdown from
 /// ever completing, so only use this when every handler is sure to return.
+///
+/// ```gleam
+/// builder
+/// |> tup.infinite_shutdown_timeout
+/// ```
 pub fn infinite_shutdown_timeout(builder: Builder(user_state, user_message)) {
   Builder(..builder, shutdown_timeout: ShutdownNever)
 }
@@ -282,13 +441,29 @@ pub fn infinite_shutdown_timeout(builder: Builder(user_state, user_message)) {
 /// The most bytes one read hands to your handler. Erlang's default is about 
 /// 9 KB.
 ///
-/// A larger buffer means fewer and bigger `Incoming` messages, which pays off 
+/// A larger buffer means fewer and bigger `Incoming` messages which pays off 
 /// when clients send a lot of data. It costs the memory on every connection
 /// so provide careful values.
+///
+/// ```gleam
+/// builder
+/// |> tup.buffer_size(65_536)
+/// ```
 pub fn buffer_size(builder: Builder(user_state, user_message), bytes: Int) {
   Builder(..builder, buffer_size: option.Some(bytes))
 }
 
+/// Sets a callback that runs in every open connection when the server shuts
+/// down, ahead of `on_close` and within the shutdown timeout. Nothing runs by
+/// default.
+///
+/// ```gleam
+/// builder
+/// |> tup.on_shutdown(fn(connection, _state) {
+///   let _ = tup.send(connection, bytes_tree.from_string("bye\n"))
+///   Nil
+/// })
+/// ```
 pub fn on_shutdown(
   builder: Builder(user_state, user_message),
   on_shutdown: fn(Connection, user_state) -> Nil,
@@ -304,11 +479,22 @@ pub fn on_shutdown(
   )
 }
 
+/// Where the server listens.
 pub type Address {
+  /// A TCP socket bound to `interface`; an IPv4 or IPv6 address or
+  /// `"localhost"`. With port 0 the system picks a free port.
   Tcp(interface: String, port: Int)
+  /// A Unix domain socket at `path`. The path must be 1 to 107 bytes long
+  /// with no NUL in it.
   Unix(path: String)
 }
 
+/// Sets where the server listens. Defaults to TCP on 127.0.0.1 port 3000.
+///
+/// ```gleam
+/// builder
+/// |> tup.listening(on: Tcp(interface: "0.0.0.0", port: 8080))
+/// ```
 pub fn listening(
   builder: Builder(user_state, user_message),
   on address: Address,
@@ -316,12 +502,20 @@ pub fn listening(
   Builder(..builder, address:)
 }
 
+/// How the socket feeds packets to the handler. Each mode is the matching
+/// `active` socket option in Erlang.
 pub type ActiveState {
+  /// One packet at a time. The connection arms the socket again after each
+  /// handler run.
   Once
+  /// `n` packets at a time. The connection arms the socket again after the
+  /// batch.
   Count(n: Int)
+  /// Every packet as soon as it arrives with no pause.
   Active
 }
 
+/// Converts an `ActiveState` into a `socket.ActiveState`.
 fn to_socket_active_state(active_state: ActiveState) -> socket.ActiveState {
   case active_state {
     Once -> socket.Once
@@ -330,6 +524,12 @@ fn to_socket_active_state(active_state: ActiveState) -> socket.ActiveState {
   }
 }
 
+/// Sets the active state every connection starts in. Defaults to `Once`.
+///
+/// ```gleam
+/// builder
+/// |> tup.active_state(Count(10))
+/// ```
 pub fn active_state(
   builder: Builder(user_state, user_message),
   active_state: ActiveState,
@@ -337,6 +537,8 @@ pub fn active_state(
   Builder(..builder, active_state: to_socket_active_state(active_state))
 }
 
+/// TLS settings for the server. Create them with `tls` and refine them with
+/// `verifying_clients`, `with_alpn` and `session_tickets`.
 pub opaque type Tls {
   Tls(
     certificate: Certificate,
@@ -346,14 +548,22 @@ pub opaque type Tls {
   )
 }
 
+/// Where the server's certificate chain and private key come from. Every
+/// source must hold at least one certificate.
 pub type Certificate {
+  /// PEM files on disk.
   Disk(cert: String, key: String)
+  /// PEM files on disk, the key encrypted with `password`.
   EncryptedDisk(cert: String, key: String, password: String)
+  /// PEM encoded bytes.
   Pem(cert: BitArray, key: BitArray)
+  /// PEM encoded bytes, the key encrypted with `password`.
   EncryptedPem(cert: BitArray, key: BitArray, password: String)
+  /// A DER encoded chain with the server's own certificate first, and its key.
   Der(chain: List(BitArray), key: TlsPrivateKey)
 }
 
+/// A DER encoded private key tagged with its format.
 pub type TlsPrivateKey {
   /// A PKCS #1 `RSAPrivateKey`.
   RsaPrivateKey(BitArray)
@@ -365,6 +575,7 @@ pub type TlsPrivateKey {
   PrivateKeyInfo(BitArray)
 }
 
+/// Converts a `TlsPrivateKey` into a `socket.PrivateKey`.
 fn to_internal_key(key: TlsPrivateKey) -> socket.PrivateKey {
   case key {
     RsaPrivateKey(key) -> socket.RsaPrivateKey(key)
@@ -374,6 +585,14 @@ fn to_internal_key(key: TlsPrivateKey) -> socket.PrivateKey {
   }
 }
 
+/// Creates TLS settings around `certificate`. By default the clients are not 
+/// asked for a certificate, no ALPN protocols are offered and session tickets 
+/// are stateless. Every TLS server speaks TLS 1.2 and 1.3, applies its own 
+/// cipher order and refuses client renegotiation.
+///
+/// ```gleam
+/// tup.tls(tup.Disk(cert: "priv/cert.pem", key: "priv/key.pem"))
+/// ```
 pub fn tls(certificate: Certificate) {
   Tls(
     certificate:,
@@ -383,32 +602,62 @@ pub fn tls(certificate: Certificate) {
   )
 }
 
+/// Whether clients are asked for a certificate and what happens to a client
+/// that sends none.
 pub type ClientCertificates {
+  /// Ask for a certificate and check it against `trusting` when one comes. A 
+  /// client that sends none is let through.
   Requested(trusting: TrustStore)
+  /// Ask for a certificate and refuse the handshake when none comes or it fails 
+  /// the check against `trusting`.
   Required(trusting: TrustStore)
 }
 
+/// The authorities client certificates are checked against. Must hold at least 
+/// one certificate.
 pub type TrustStore {
+  /// The authorities installed on the operating system.
   SystemTrustStore
+  /// A PEM file on disk.
   TrustDisk(path: String)
+  /// PEM encoded bytes.
   TrustPem(bytes: BitArray)
+  /// DER encoded certificates.
   TrustDer(certificates: List(BitArray))
 }
 
+/// Asks clients for a certificate and verifies it against a trust store.
+///
+/// ```gleam
+/// tup.tls(tup.Disk(cert: "priv/cert.pem", key: "priv/key.pem"))
+/// |> tup.verifying_clients(on: tup.Required(trusting: tup.TrustDisk("priv/ca.pem")))
+/// ```
 pub fn verifying_clients(tls: Tls, on: ClientCertificates) {
   Tls(..tls, client_certificates: option.Some(on))
 }
 
+/// Sets the ALPN protocols the server offers, most preferred first. Each must
+/// be 1 to 255 bytes long. Duplicates are dropped.
+///
+/// ```gleam
+/// tls(certificate)
+/// |> with_alpn(["h2", "http/1.1"])
+/// ```
 pub fn with_alpn(tls: Tls, protocols: List(String)) {
   Tls(..tls, alpn: protocols)
 }
 
+/// How session tickets are issued for TLS session resumption.
 pub type TicketMode {
+  /// No tickets are issued.
   NoTickets
+  /// Tickets point at session state kept on the server.
   Stateful
+  /// Tickets carry the session state themselves, encrypted.
   Stateless
 }
 
+/// Converts a `TicketMode` into a `socket.TicketMode`.
 fn to_internal_ticket_mode(mode: TicketMode) -> socket.TicketMode {
   case mode {
     NoTickets -> socket.TicketsDisabled
@@ -417,14 +666,35 @@ fn to_internal_ticket_mode(mode: TicketMode) -> socket.TicketMode {
   }
 }
 
+/// Sets how session tickets are issued. Defaults to `Stateless`.
+///
+/// ```gleam
+/// tls(certificate)
+/// |> tup.session_tickets(NoTickets)
+/// ```
 pub fn session_tickets(tls: Tls, mode: TicketMode) {
   Tls(..tls, session_tickets: mode)
 }
 
+/// Wraps every connection in TLS with the given settings.
+///
+/// ```gleam
+/// builder
+/// |> tup.with_tls(tup.tls(tup.Disk(cert: "priv/cert.pem", key: "priv/key.pem")))
+/// ```
 pub fn with_tls(builder: Builder(user_state, user_message), tls: Tls) {
   Builder(..builder, tls: option.Some(tls))
 }
 
+/// Registers the started server under `name`. `listen_endpoint`, `suspend`,
+/// `resume` and `connection_count` look the server up by it.
+///
+/// ```gleam
+/// let name = process.new_name("tup")
+///
+/// builder
+/// |> tup.named(name)
+/// ```
 pub fn named(
   builder: Builder(user_state, user_message),
   name: process.Name(Server),
@@ -432,6 +702,24 @@ pub fn named(
   Builder(..builder, name: option.Some(name))
 }
 
+/// The endpoint the named server listens on, with the port the system picked
+/// when the server was started on port 0. Waits up to `timeout` milliseconds
+/// for the listener to answer.
+///
+/// Returns `Error(Nil)` when no server runs under `name`, when it is suspended 
+/// or when the listener does not answer in time.
+///
+/// ```gleam
+/// let name = process.new_name("tup")
+/// let assert Ok(_started) =
+///   builder
+///   |> tup.listening(on: Tcp(interface: "127.0.0.1", port: 0))
+///   |> tup.named(name)
+///   |> tup.start
+///
+/// tup.listen_endpoint(name, within: 1000)
+/// // -> Ok(TcpEndpoint(Ipv4(127, 0, 0, 1), 54321))
+/// ```
 pub fn listen_endpoint(
   name: process.Name(Server),
   within timeout: Int,
@@ -443,83 +731,78 @@ pub fn listen_endpoint(
   |> result.map(with: from_socket_endpoint)
 }
 
-// TODO: suspend & resume
-// pub type DrainError {
-//   NotRunning
-//   TimedOut(remaining: Int)
-// }
+/// Stop accepting connections and close the listen socket. Connections that
+/// are already open keep running.
+/// 
+/// While suspended the new clients are refused and `listen_endpoint` returns 
+/// `Error(Nil)`.
+///
+/// Returns `Error(Nil)` when no server is running under the `name`.
+///
+/// ```gleam
+/// let assert Ok(Nil) = tup.suspend(name)
+///
+/// tup.listen_endpoint(name, within: 1000)
+/// // -> Error(Nil)
+/// ```
+pub fn suspend(name: process.Name(Server)) -> Result(Nil, Nil) {
+  use root <- result.try(process.named(name))
+  tree.terminate_child(root, tree.acceptor_pool)
+}
 
-// pub fn drain(
-//   name: process.Name(Server),
-//   within timeout: Int,
-// ) -> Result(Nil, DrainError) {
-//   case process.named(name) {
-//     Ok(root) -> {
-//       case tree.terminate_child(root, tree.acceptor_pool) {
-//         Ok(Nil) ->
-//           do_drain(root:, deadline: monotonic_milliseconds() + timeout, seen: 0)
-//         Error(Nil) -> Error(NotRunning)
-//       }
-//     }
-//     Error(Nil) -> Error(NotRunning)
-//   }
-// }
+/// Open the listen socket again and start accepting connections after `suspend`. 
+/// With port 0 the system picks a new port.
+///
+/// Returns `Error(Nil)` when no server is running under `name` or when the 
+/// socket can't be opened again, for example because another program took the 
+/// port while the server was suspended.
+///
+/// ```gleam
+/// tup.resume(name)
+/// // -> Ok(Nil)
+/// ```
+pub fn resume(name: process.Name(Server)) -> Result(Nil, Nil) {
+  use root <- result.try(process.named(name))
+  tree.restart_child(root, tree.acceptor_pool)
+}
 
-// fn do_drain(
-//   root root: process.Pid,
-//   deadline deadline: Int,
-//   seen seen: Int,
-// ) -> Result(Nil, DrainError) {
-//   case process.is_alive(root) {
-//     True -> {
-//       case tree.child(root, tree.acceptor_pool) {
-//         Ok(_pid) -> {
-//           let _suspended = tree.terminate_child(root, tree.acceptor_pool)
-//           Nil
-//         }
-//         Error(Nil) -> Nil
-//       }
+/// How many connections are open right now. Returns `Error(Nil)` when no
+/// server is running under `name`.
+///
+/// ```gleam
+/// tup.connection_count(name)
+/// // -> Ok(12)
+/// ```
+pub fn connection_count(name: process.Name(Server)) -> Result(Int, Nil) {
+  use root <- result.try(process.named(name))
+  use connections <- result.try(tree.child(root, tree.connection_supervisor))
+  tree.active_children(connections)
+}
 
-//       let count = case tree.child(root, tree.connection_supervisor) {
-//         Ok(factory) -> tree.active_children(factory)
-//         Error(Nil) -> Error(Nil)
-//       }
-
-//       let now = monotonic_milliseconds()
-//       case count {
-//         Ok(0) -> Ok(Nil)
-//         Ok(remaining) if now >= deadline -> Error(TimedOut(remaining:))
-//         Error(Nil) if now >= deadline -> Error(TimedOut(remaining: seen))
-//         Ok(remaining) -> wait_then(root, deadline, now, remaining)
-//         Error(Nil) -> wait_then(root, deadline, now, seen)
-//       }
-//     }
-//     False -> Error(NotRunning)
-//   }
-// }
-
-// const drain_poll_interval = 100
-
-// fn wait_then(
-//   root: process.Pid,
-//   deadline: Int,
-//   now: Int,
-//   seen: Int,
-// ) -> Result(Nil, DrainError) {
-//   int.min(drain_poll_interval, deadline - now)
-//   |> process.sleep
-
-//   do_drain(root, deadline:, seen:)
-// }
-
-// @external(erlang, "tup_ffi", "monotonic_milliseconds")
-// fn monotonic_milliseconds() -> Int
-
+/// A child specification that runs the server under a supervisor.
+///
+/// ```gleam
+/// static_supervisor.new(static_supervisor.OneForOne)
+/// |> static_supervisor.add(tup.supervised(builder))
+/// |> static_supervisor.start
+/// ```
 pub fn supervised(builder: Builder(user_state, user_message)) {
   use <- supervision.supervisor
   start(builder)
 }
 
+/// Starts the server linked to the calling process.
+///
+/// Fails with `actor.InitFailed` when a setting is out of range, a
+/// certificate, key or trust store cannot be read or holds nothing, an ALPN
+/// protocol is malformed, or `name` is already registered. A listen socket
+/// that cannot be opened comes back as an `Error` as well, instead of
+/// crashing the caller.
+///
+/// ```gleam
+/// let assert Ok(_started) = tup.start(builder)
+/// process.sleep_forever()
+/// ```
 pub fn start(builder: Builder(user_state, user_message)) {
   let Builder(
     address:,
@@ -610,6 +893,7 @@ pub fn start(builder: Builder(user_state, user_message)) {
   //   waiting for the new connection. Tup has 30 seconds accept timeout that 
   //   can at least provide some interval for reading incomming OTP messages.
   //
+  use <- trapping_exits
   relay.new(fn(children) {
     case name {
       option.Some(name) -> {
@@ -631,6 +915,13 @@ pub fn start(builder: Builder(user_state, user_message)) {
   |> relay.start
 }
 
+/// Run `start` with exits trapped. The main reason why is so a server that 
+/// fails to start returns an `Error` instead of killing the caller through the 
+/// link.
+@external(erlang, "tup_ffi", "trapping_exits")
+fn trapping_exits(start: fn() -> a) -> a
+
+/// Rejects a buffer size that is not greater than zero.
 fn try_buffer_size(
   buffer_size: option.Option(Int),
   callback: fn(option.Option(Int)) -> Result(a, actor.StartError),
@@ -642,6 +933,8 @@ fn try_buffer_size(
   }
 }
 
+/// Rejects a negative timeout. `ShutdownNever` becomes `-1` which gleam_otp
+/// treats as infinity.
 fn try_shutdown_timeout(
   shutdown_timeout: ShutdownTimeout,
   callback: fn(Int) -> Result(a, actor.StartError),
@@ -652,11 +945,11 @@ fn try_shutdown_timeout(
         "Provided shutdown timeout is negative. Use infinite_shutdown_timeout to wait for connections without a limit.",
       ))
     ShutdownAfter(milliseconds:) -> callback(milliseconds)
-    // gleam_otp turns a negative child shutdown time into `infinity`
     ShutdownNever -> callback(-1)
   }
 }
 
+/// Rejects a pool size that is not greater than zero.
 fn try_pool_size(
   pool_size: Int,
   callback: fn(Int) -> Result(a, actor.StartError),
@@ -668,6 +961,7 @@ fn try_pool_size(
   }
 }
 
+/// Rejects a port outside 0..65535.
 fn try_port(
   port: Int,
   callback: fn() -> Result(a, actor.StartError),
@@ -679,6 +973,8 @@ fn try_port(
   }
 }
 
+/// Resolves the interface string. `"0.0.0.0"` is `Any`, `"localhost"` and
+/// `"127.0.0.1"` are `Loopback`, any other valid address is bound as given.
 fn try_interface(
   interface: String,
   callback: fn(socket.Interface) -> Result(a, actor.StartError),
@@ -694,15 +990,15 @@ fn try_interface(
   }
 }
 
+/// Parses an IPv4 or IPv6 address from text.
 @external(erlang, "tup_ffi", "parse_address")
 fn parse_address(interface: String) -> Result(socket.IpAddress, Nil)
 
+/// Rejects an empty path, a path over 107 bytes, or one containing NUL.
 fn try_unix_path(
   path: String,
   callback: fn() -> Result(a, actor.StartError),
 ) -> Result(a, actor.StartError) {
-  // TODO: a unix path that exists but isn't a socket, for example Unix("/tmp"), 
-  // kills the caller instead of returning an Error.
   case path, string.byte_size(path) {
     "", _length -> Error(actor.InitFailed("Empty unix path is not allowed."))
     _path, length if length > 107 ->
@@ -716,12 +1012,16 @@ fn try_unix_path(
   }
 }
 
+/// Options every TLS server gets: TLS 1.2 and 1.3 only, the server's cipher
+/// order, no client renegotiation.
 const default_tls_options = [
   socket.Versions([socket.Tls12, socket.Tls13]),
   socket.HonorCipherOrder(True),
   socket.ClientRenegotiation(False),
 ]
 
+/// Builds the TLS option list from the settings. `None` passes through for
+/// plain TCP.
 fn try_tls(
   tls: option.Option(Tls),
   callback: fn(option.Option(List(socket.TlsOption))) ->
@@ -750,6 +1050,8 @@ fn try_tls(
   }
 }
 
+/// Encodes the protocols as bytes, dropping duplicates and rejecting names
+/// that are empty or over 255 bytes.
 fn try_alpn(
   alpn: List(String),
   callback: fn(List(BitArray)) -> Result(a, actor.StartError),
@@ -768,6 +1070,7 @@ fn try_alpn(
   |> result.try(callback)
 }
 
+/// Loads the certificate chain and key from whichever source was given.
 fn try_certificate(
   tls: Certificate,
   callback: fn(socket.CertificateKey) -> Result(a, actor.StartError),
@@ -783,6 +1086,7 @@ fn try_certificate(
   }
 }
 
+/// Reads the certificate and key files and decodes them as PEM.
 fn try_disk_certificate(
   certificate_file: String,
   key_file: String,
@@ -795,6 +1099,7 @@ fn try_disk_certificate(
   try_pem_certificate(certificate, key, password, callback)
 }
 
+/// Reads a file. A failure becomes an `InitFailed` naming the path.
 fn try_read(
   path: String,
   callback: fn(BitArray) -> Result(a, actor.StartError),
@@ -812,8 +1117,11 @@ fn try_read(
   }
 }
 
+/// Error for a certificate source that holds no certificate.
 const no_certificate = "No certificate was given. A listener with no certificate accepts connections and then fails every handshake."
 
+/// Decodes a PEM chain and private key, with `password` when the key is
+/// encrypted.
 fn try_pem_certificate(
   cert: BitArray,
   key: BitArray,
@@ -835,6 +1143,7 @@ fn try_pem_certificate(
   }
 }
 
+/// Wraps a DER chain and its key, rejecting an empty chain.
 fn try_der_certificate(
   chain: List(BitArray),
   key: TlsPrivateKey,
@@ -847,6 +1156,8 @@ fn try_der_certificate(
   }
 }
 
+/// Builds the peer verification options for the client certificate policy.
+/// None when clients are not verified.
 fn try_client_certificates(
   client_certificates: option.Option(ClientCertificates),
   callback: fn(List(socket.TlsOption)) -> Result(a, actor.StartError),
@@ -860,8 +1171,11 @@ fn try_client_certificates(
   }
 }
 
+/// Error for a trust store that holds no certificate.
 const no_trust_store = "The trust store holds no certificate. There is no authority to check client certificates against, so every client would be rejected."
 
+/// Loads the trust store and pairs it with the peer verification options.
+/// `required` decides whether a client without a certificate is refused.
 fn try_trust_store(
   store: TrustStore,
   required: Bool,
@@ -892,6 +1206,7 @@ fn try_trust_store(
   }
 }
 
+/// Decodes PEM encoded authorities, rejecting an empty bundle.
 fn try_pem_trust_store(
   bytes: BitArray,
   options: List(socket.TlsOption),
@@ -904,6 +1219,7 @@ fn try_pem_trust_store(
   }
 }
 
+/// Rejects a name that is already registered.
 fn try_name(
   name: option.Option(process.Name(Server)),
   callback: fn() -> Result(a, actor.StartError),
