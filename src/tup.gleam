@@ -13,11 +13,11 @@ import gleam/result
 import gleam/string
 import logging
 import relay_supervisor as relay
-import tup/internals/connection
-import tup/internals/file
-import tup/internals/listener
-import tup/internals/pool
-import tup/internals/tree
+import tup/internal/connection
+import tup/internal/file
+import tup/internal/listener
+import tup/internal/pool
+import tup/internal/tree
 import tup/socket
 
 /// An IPv4 or IPv6 address.

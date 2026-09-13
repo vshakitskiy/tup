@@ -5,7 +5,7 @@ import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
 import relay_supervisor as relay
-import tup/internals/file
+import tup/internal/file
 import tup/socket
 
 pub type Argument {

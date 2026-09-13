@@ -3,8 +3,7 @@ name: test
 on:
   push:
     branches:
-      - master
-      - main
+      - mistress
   pull_request:
 
 jobs:

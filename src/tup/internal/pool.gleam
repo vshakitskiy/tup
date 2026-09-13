@@ -6,8 +6,8 @@ import gleam/otp/static_supervisor as supervisor
 import gleam/otp/supervision
 import logging
 import relay_supervisor as relay
-import tup/internals/connection
-import tup/internals/listener
+import tup/internal/connection
+import tup/internal/listener
 import tup/socket
 
 pub fn add_child(
