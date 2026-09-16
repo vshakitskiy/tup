@@ -5,6 +5,115 @@
 //// - [`inet`](https://www.erlang.org/doc/apps/kernel/inet.html)
 //// - [`ssl`](https://www.erlang.org/doc/apps/ssl/ssl.html)
 //// - [`public_key`](https://www.erlang.org/doc/apps/public_key/public_key.html)
+////
+//// <script>
+//// const docs = [
+////   {
+////     header: "Listening",
+////     functions: [
+////       "listen",
+////       "listen_tls",
+////       "accept",
+////       "handshake",
+////       "close_listener",
+////       "sockname_listener"
+////     ]
+////   },
+////   {
+////     header: "Connections",
+////     functions: [
+////       "send",
+////       "receive",
+////       "close",
+////       "shutdown",
+////       "controlling_process",
+////       "set_options",
+////       "selector"
+////     ]
+////   },
+////   {
+////     header: "Information",
+////     functions: [
+////       "sockname",
+////       "peername",
+////       "negotiated_protocol",
+////       "peer_certificate"
+////     ]
+////   },
+////   {
+////     header: "Certificates",
+////     functions: [
+////       "certificates_from_pem",
+////       "private_key_from_pem",
+////       "system_certificate_authorities"
+////     ]
+////   },
+////   {
+////     header: "Addresses",
+////     functions: [
+////       "ip_address_to_string",
+////       "endpoint_to_string"
+////     ]
+////   },
+////   {
+////     header: "Errors",
+////     functions: [
+////       "describe_error",
+////       "describe_alert_description",
+////       "describe_pem_error"
+////     ]
+////   }
+//// ]
+//// const callback = () => {
+////   const list = document.querySelector(".sidebar > ul:last-of-type")
+////   const sortedLists = document.createDocumentFragment()
+////   const sortedMembers = document.createDocumentFragment()
+////
+////   for (const section of docs) {
+////     sortedLists.append((() => {
+////       const node = document.createElement("h3")
+////       node.append(section.header)
+////       return node
+////     })())
+////     sortedMembers.append((() => {
+////       const node = document.createElement("h2")
+////       node.append(section.header)
+////       return node
+////     })())
+////
+////     const sortedList = document.createElement("ul")
+////     sortedLists.append(sortedList)
+////
+////     const sortedFunctions = [...section.functions].sort()
+////
+////     for (const funcName of sortedFunctions) {
+////       const href = `#${funcName}`
+////       const member = document.querySelector(
+////         `.member:has(h2 > a[href="${href}"])`
+////       )
+////       const sidebar = list.querySelector(`li:has(a[href="${href}"])`)
+////       if (sidebar) sortedList.append(sidebar)
+////       if (member) sortedMembers.append(member)
+////     }
+////   }
+////
+////   document.querySelector(".sidebar").insertBefore(sortedLists, list)
+////   document
+////     .querySelector(".module-members:has(#module-values)")
+////     .insertBefore(
+////       sortedMembers,
+////       document.querySelector("#module-values").nextSibling
+////     )
+//// }
+////
+//// document.readyState !== "loading"
+////   ? callback()
+////   : document.addEventListener(
+////     "DOMContentLoaded",
+////     callback,
+////     { once: true }
+////   )
+//// </script>
 
 import gleam/bytes_tree
 import gleam/dynamic
@@ -233,18 +342,14 @@ pub type AlertDescription {
 }
 
 /// Whether received data is delivered as `Message`s or read with `receive`.
-/// 
-/// `Once` and `Packets` provides a flow control: the socket goes back to 
-/// `Passive` on its own and that makes a fast peer not flooding the owner's 
-/// mailbox.
 pub type ActiveState {
   /// Nothing is delivered. Read the socket with `receive`.
   Passive
-  /// Everything is delivered with no flow control.
+  /// Every message as it arrives.
   Always
-  /// One message then switching to `Passive`.
+  /// One message, then back to `Passive`.
   Once
-  /// `count` amount of messages then switching to `Passive`.
+  /// `count` messages, then back to `Passive`.
   Packets(count: Int)
 }
 
@@ -256,8 +361,7 @@ pub type Interface {
   Any
   /// The loopback interface only.
   Loopback
-  /// The path of a Unix domain socket. Needs `port` to be `0` and 
-  /// `Family(Local)`.
+  /// The path of a Unix domain socket. Needs `port` to be `0`.
   Local(String)
 }
 
@@ -269,11 +373,21 @@ pub type AddressFamily {
   Inet6
 }
 
-/// Options for either transport. The ones marked listen only are fixed when
+/// Options for either transport. The ones marked "listen only" are fixed when
 /// the socket opens. The rest can also be changed later with `set_options`.
 ///
 /// Sockets are always opened in binary mode and deliver bytes unframed.
 pub type TcpOption {
+  /// Listen only. How many pending connections the kernel queues.
+  Backlog(Int)
+  /// Listen only. The local address to bind.
+  BindAddress(Interface)
+  /// Listen only. The address family which has to match `BindAddress`.
+  Family(AddressFamily)
+  /// Listen only. Refuse IPv4 mapped addresses on an IPv6 socket.
+  Ipv6Only(Bool)
+  /// Listen only. An already open file descriptor to listen on.
+  FileDescriptor(Int)
   /// How received data reaches the owner.
   Active(ActiveState)
   /// Allow binding a port that is still in `TIME_WAIT`. That allows a restarted
@@ -312,16 +426,6 @@ pub type TcpOption {
   HighMessageQueueWatermark(Int)
   /// `LowWatermark` for the driver's message queue.
   LowMessageQueueWatermark(Int)
-  /// How many pending connections the kernel queues. Listen only.
-  Backlog(Int)
-  /// The local address to bind. Listen only.
-  BindAddress(Interface)
-  /// The address family which has to match `BindAddress`. Listen only.
-  Family(AddressFamily)
-  /// Refuse IPv4 mapped addresses on an IPv6 socket. Listen only.
-  Ipv6Only(Bool)
-  /// An already open file descriptor to listen on. Listen only.
-  FileDescriptor(Int)
 }
 
 /// Whether the server asks the client for a certificate.
@@ -517,9 +621,9 @@ pub type Message {
 /// A `SocketError` as a lower case phrase that reads after a colon.
 ///
 /// ```gleam
-/// "Could not open the listen socket: " <> error_to_string(error)
+/// "Could not open the listen socket: " <> describe_error(error)
 /// ```
-pub fn error_to_string(error: SocketError) -> String {
+pub fn describe_error(error: SocketError) -> String {
   case error {
     Closed -> "the socket is closed"
     Timeout -> "the call ran out of time"
@@ -530,7 +634,7 @@ pub fn error_to_string(error: SocketError) -> String {
     NoPeerCertificate -> "the peer sent no certificate"
     TlsAlert(description:, detail:) ->
       "the TLS connection was closed by an alert, "
-      <> alert_description_to_string(description)
+      <> describe_alert_description(description)
       <> " ("
       <> detail
       <> ")"
@@ -582,7 +686,7 @@ pub fn error_to_string(error: SocketError) -> String {
 }
 
 /// An `AlertDescription` as a lower case phrase that reads after a colon.
-pub fn alert_description_to_string(description: AlertDescription) -> String {
+pub fn describe_alert_description(description: AlertDescription) -> String {
   case description {
     CloseNotify -> "the sender is closing the connection cleanly"
     UnexpectedMessage -> "a message arrived out of order"
@@ -622,7 +726,7 @@ pub fn alert_description_to_string(description: AlertDescription) -> String {
 }
 
 /// A `PemError` as a lower case phrase that reads after a colon.
-pub fn pem_error_to_string(error: PemError) -> String {
+pub fn describe_pem_error(error: PemError) -> String {
   case error {
     NoPrivateKey -> "the bytes hold no private key"
     EncryptedPrivateKey -> "the key is encrypted and no password was given"
@@ -917,6 +1021,7 @@ pub fn certificates_from_pem(pem: BitArray) -> List(BitArray)
 /// encrypted.
 ///
 /// [`public_key:pem_decode/1`](https://www.erlang.org/doc/apps/public_key/public_key.html#pem_decode/1)
+/// and [`public_key:pem_entry_decode/2`](https://www.erlang.org/doc/apps/public_key/public_key.html#pem_entry_decode/2)
 @external(erlang, "tup_socket_ffi", "private_key_from_pem")
 pub fn private_key_from_pem(
   pem: BitArray,

@@ -96,13 +96,13 @@ fn start(argument: Argument) {
           }
           Error(error) ->
             Error(
-              "Could not retrieve sockname: " <> socket.error_to_string(error),
+              "Could not retrieve sockname: " <> socket.describe_error(error),
             )
         }
       }
       Error(error) ->
         Error(
-          "Could not open the listen socket: " <> socket.error_to_string(error),
+          "Could not open the listen socket: " <> socket.describe_error(error),
         )
     }
   })

@@ -1,5 +1,133 @@
 //// A TCP and TLS server. Describe it with `new` and the builder functions,
 //// then run it with `start` or hand it to a supervisor with `supervised`.
+////
+//// <script>
+//// const docs = [
+////   {
+////     header: "Builder",
+////     functions: [
+////       "new",
+////       "listening",
+////       "pool_size",
+////       "active_state",
+////       "buffer_size",
+////       "shutdown_timeout",
+////       "infinite_shutdown_timeout",
+////       "on_shutdown",
+////       "force_ipv6",
+////       "with_tls",
+////       "named"
+////     ]
+////   },
+////  {
+////     header: "TLS",
+////     functions: [
+////       "tls",
+////       "verifying_clients",
+////       "with_alpn",
+////       "session_tickets"
+////     ]
+////   },
+////   {
+////     header: "Server",
+////     functions: [
+////       "start",
+////       "supervised"
+////     ]
+////   },
+////   {
+////     header: "Running Server",
+////     functions: [
+////       "listen_endpoint",
+////       "suspend",
+////       "resume",
+////       "connection_count"
+////     ]
+////   },
+////   {
+////     header: "Next",
+////     functions: [
+////       "continue",
+////       "with_selector",
+////       "with_active_state",
+////       "stop",
+////       "stop_abnormal"
+////     ]
+////   },
+////   {
+////     header: "Connection",
+////     functions: [
+////       "send",
+////       "peer",
+////       "local",
+////       "socket"
+////     ]
+////   },
+////   {
+////     header: "Addresses",
+////     functions: [
+////       "ip_address_to_string",
+////       "unmap_ipv4",
+////       "endpoint_to_string"
+////     ]
+////   },
+////   {
+////     header: "Errors",
+////     functions: [
+////       "describe_socket_error"
+////     ]
+////   }
+//// ]
+//// const callback = () => {
+////   const list = document.querySelector(".sidebar > ul:last-of-type")
+////   const sortedLists = document.createDocumentFragment()
+////   const sortedMembers = document.createDocumentFragment()
+////
+////   for (const section of docs) {
+////     sortedLists.append((() => {
+////       const node = document.createElement("h3")
+////       node.append(section.header)
+////       return node
+////     })())
+////     sortedMembers.append((() => {
+////       const node = document.createElement("h2")
+////       node.append(section.header)
+////       return node
+////     })())
+////
+////     const sortedList = document.createElement("ul")
+////     sortedLists.append(sortedList)
+////
+////     const sortedFunctions = [...section.functions].sort()
+////
+////     for (const funcName of sortedFunctions) {
+////       const href = `#${funcName}`
+////       const member = document.querySelector(
+////         `.member:has(h2 > a[href="${href}"])`
+////       )
+////       const sidebar = list.querySelector(`li:has(a[href="${href}"])`)
+////       if (sidebar) sortedList.append(sidebar)
+////       if (member) sortedMembers.append(member)
+////     }
+////   }
+////
+////   document.querySelector(".sidebar").insertBefore(sortedLists, list)
+////   document
+////     .querySelector(".module-members:has(#module-values)")
+////     .insertBefore(
+////       sortedMembers,
+////       document.querySelector("#module-values").nextSibling
+////     )
+//// }
+////
+//// document.readyState !== "loading"
+////   ? callback()
+////   : document.addEventListener(
+////     "DOMContentLoaded",
+////     callback,
+////     { once: true }
+////   )
+//// </script>
 
 import gleam/bit_array
 import gleam/bytes_tree
@@ -181,11 +309,11 @@ pub fn send(connection: Connection, data: bytes_tree.BytesTree) {
 /// ```gleam
 /// case tup.send(connection, data) {
 ///   Ok(Nil) -> Nil
-///   Error(error) -> io.println(socket_error_to_string(error))
+///   Error(error) -> io.println(describe_socket_error(error))
 /// }
 /// ```
-pub fn socket_error_to_string(error: socket.SocketError) {
-  socket.error_to_string(error)
+pub fn describe_socket_error(error: socket.SocketError) {
+  socket.describe_error(error)
 }
 
 /// What a connection does once the handler has run. Build one with
@@ -1167,7 +1295,7 @@ fn try_pem_certificate(
         Error(pem_error) ->
           Error(actor.InitFailed(
             "Could not read the private key: "
-            <> socket.pem_error_to_string(pem_error)
+            <> socket.describe_pem_error(pem_error)
             <> ".",
           ))
       }

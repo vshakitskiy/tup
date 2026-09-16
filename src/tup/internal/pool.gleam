@@ -167,7 +167,7 @@ fn start_acceptor(
               Error(error) -> {
                 actor.stop_abnormal(
                   "Failed to transfer socket ownership: "
-                  <> socket.error_to_string(error),
+                  <> socket.describe_error(error),
                 )
               }
             }
@@ -183,13 +183,13 @@ fn start_acceptor(
       Error(socket.Timeout) | Error(socket.Econnaborted) -> loop(state)
       Error(socket.Closed) | Error(socket.Einval) -> actor.stop()
       Error(socket.Emfile as error) | Error(socket.Enfile as error) -> {
-        { "Failed to accept the connection: " <> socket.error_to_string(error) }
+        { "Failed to accept the connection: " <> socket.describe_error(error) }
         |> logging.log(logging.Error, _)
 
         loop_after(state, 100)
       }
       Error(error) ->
-        { "Failed to accept the connection: " <> socket.error_to_string(error) }
+        { "Failed to accept the connection: " <> socket.describe_error(error) }
         |> actor.stop_abnormal
     }
   })

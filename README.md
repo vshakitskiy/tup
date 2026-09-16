@@ -84,9 +84,8 @@ acceptors wait for connections at the same time. The default is 20.
 
 <h3 id="custom-messages">Custom Messages</h3>
 
-`on_init` receives an empty selector. Add to it any source to send messages to 
-this connection. Those messages arrive in the handler as 
-[`tup.User`](https://hexdocs.pm/tup/tup.html#Message).
+`on_init` receives an empty selector, which you may use to 
+[`tup.User`](https://hexdocs.pm/tup/tup.html#Message) messages to the connection.
 
 ```gleam
 tup.new(

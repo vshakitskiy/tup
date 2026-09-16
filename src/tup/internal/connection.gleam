@@ -255,7 +255,7 @@ pub fn start_worker(argument: Argument(user_state, user_message)) {
         Received(socket.Failed(reason:))
       -> {
         run_on_close(handlers, state)
-        { "Received socket failure: " <> socket.error_to_string(reason) }
+        { "Received socket failure: " <> socket.describe_error(reason) }
         |> dynamic.string
         |> exit
       }
@@ -374,7 +374,7 @@ fn refresh_flow_control(
   case refresh {
     Ok(Nil) -> callback()
     Error(error) -> {
-      { "Failed to follow the flow control: " <> socket.error_to_string(error) }
+      { "Failed to follow the flow control: " <> socket.describe_error(error) }
       |> dynamic.string
       |> exit
     }
