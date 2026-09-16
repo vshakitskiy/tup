@@ -1,38 +1,23 @@
 import gleam/bytes_tree
 import gleam/erlang/process
-import gleam/int
-import logging
 import tup
 
-pub fn main() -> Nil {
-  logging.set_level(logging.Debug)
-  logging.configure()
-
-  let name = process.new_name("tup")
-
-  echo tup.new(
-      on_init: fn(_connection, selector) { #(1, selector) },
+pub fn main() {
+  let assert Ok(_started) =
+    tup.new(
+      on_init: fn(_connection, selector) { #(Nil, selector) },
       handler: fn(connection, state, message) {
-        panic
-        echo message
-          as { "Incomming message! (" <> int.to_string(state) <> ")" }
-        let data = case message {
-          tup.Incoming(data) -> bytes_tree.from_bit_array(data)
-          tup.User(integer) -> bytes_tree.from_bit_array(<<integer>>)
-        }
-        case tup.send(connection, data) {
-          Ok(Nil) -> tup.continue(state + 1)
-          Error(socket) -> tup.stop_abnormal(tup.socket_error_to_string(socket))
+        case message {
+          tup.Incoming(data) -> {
+            let _sent = tup.send(connection, bytes_tree.from_bit_array(data))
+            tup.continue(state)
+          }
+          tup.User(_message) -> tup.continue(state)
         }
       },
-      on_close: fn(state) {
-        echo "Connection closed! (" <> int.to_string(state) <> ")"
-        panic
-        Nil
-      },
+      on_close: fn(_state) { Nil },
     )
-    |> tup.named(name)
-    |> tup.listening(on: tup.Tcp(interface: "127.0.0.1", port: 3000))
+    |> tup.listening(on: tup.Tcp("0.0.0.0", 3000))
     |> tup.start
 
   process.sleep_forever()

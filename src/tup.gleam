@@ -332,6 +332,7 @@ pub opaque type Builder(user_state, user_message) {
     pool_size: Int,
     shutdown_timeout: ShutdownTimeout,
     buffer_size: option.Option(Int),
+    ipv6: Bool,
     handlers: connection.Handlers(user_state, user_message),
     name: option.Option(process.Name(Server)),
   )
@@ -381,6 +382,7 @@ pub fn new(
     pool_size: 20,
     shutdown_timeout: ShutdownAfter(15_000),
     buffer_size: option.None,
+    ipv6: False,
     handlers: connection.Handlers(
       on_init: fn(connection, selector) {
         let connection = from_internal_connection(connection)
@@ -451,6 +453,13 @@ pub fn infinite_shutdown_timeout(builder: Builder(user_state, user_message)) {
 /// ```
 pub fn buffer_size(builder: Builder(user_state, user_message), bytes: Int) {
   Builder(..builder, buffer_size: option.Some(bytes))
+}
+
+/// Listen only on IPv6. IPv4 clients are refused.
+///
+/// Starting fails when the address is an IPv4 or a unix socket path.
+pub fn force_ipv6(builder: Builder(user_state, user_message)) {
+  Builder(..builder, ipv6: True)
 }
 
 /// Sets a callback that runs in every open connection when the server shuts
@@ -811,6 +820,7 @@ pub fn start(builder: Builder(user_state, user_message)) {
     pool_size:,
     shutdown_timeout:,
     buffer_size:,
+    ipv6:,
     handlers:,
     name:,
   ) = builder
@@ -822,17 +832,18 @@ pub fn start(builder: Builder(user_state, user_message)) {
   use address <- result.try(case address {
     Tcp(interface:, port:) -> {
       use <- try_port(port)
-      use interface <- try_interface(interface)
+      use interface <- try_interface(interface, ipv6)
       Ok(listener.Tcp(interface:, port:))
     }
     Unix(path:) -> {
+      use <- try_unix_ipv6(ipv6)
       use <- try_unix_path(path)
       Ok(listener.Unix(path:))
     }
   })
   use tls <- try_tls(tls)
 
-  let listener_argument = listener.Argument(address:, tls:, buffer_size:)
+  let listener_argument = listener.Argument(address:, tls:, buffer_size:, ipv6:)
   let pool_argument = pool.Argument(pool_size:, active_state:, handlers:)
 
   use <- try_name(name)
@@ -894,6 +905,7 @@ pub fn start(builder: Builder(user_state, user_message)) {
   //   can at least provide some interval for reading incomming OTP messages.
   //
   use <- trapping_exits
+
   relay.new(fn(children) {
     case name {
       option.Some(name) -> {
@@ -977,11 +989,16 @@ fn try_port(
 /// `"127.0.0.1"` are `Loopback`, any other valid address is bound as given.
 fn try_interface(
   interface: String,
+  ipv6: Bool,
   callback: fn(socket.Interface) -> Result(a, actor.StartError),
 ) -> Result(a, actor.StartError) {
   case interface, parse_address(interface) {
     "0.0.0.0", _parsed -> callback(socket.Any)
     "localhost", _parsed | "127.0.0.1", _parsed -> callback(socket.Loopback)
+    _interface, Ok(socket.Ipv4(..)) if ipv6 ->
+      "Provided interface is an IPv4 address, which force_ipv6 cannot listen on. Use an IPv6 address or drop force_ipv6."
+      |> actor.InitFailed
+      |> Error
     _interface, Ok(ip_address) -> callback(socket.Address(ip_address))
     _interface, Error(Nil) ->
       "Invalid interface provided. The value must be a valid IPv4/IPv6 address or \"localhost\""
@@ -993,6 +1010,20 @@ fn try_interface(
 /// Parses an IPv4 or IPv6 address from text.
 @external(erlang, "tup_ffi", "parse_address")
 fn parse_address(interface: String) -> Result(socket.IpAddress, Nil)
+
+/// A unix socket has no address family to force.
+fn try_unix_ipv6(
+  ipv6: Bool,
+  callback: fn() -> Result(a, actor.StartError),
+) -> Result(a, actor.StartError) {
+  case ipv6 {
+    True ->
+      "A unix socket cannot listen on IPv6. Drop force_ipv6."
+      |> actor.InitFailed
+      |> Error
+    False -> callback()
+  }
+}
 
 /// Rejects an empty path, a path over 107 bytes, or one containing NUL.
 fn try_unix_path(

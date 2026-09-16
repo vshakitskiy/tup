@@ -13,6 +13,7 @@ pub type Argument {
     address: Address,
     tls: option.Option(List(socket.TlsOption)),
     buffer_size: option.Option(Int),
+    ipv6: Bool,
   )
 }
 
@@ -61,6 +62,15 @@ fn start(argument: Argument) {
     let tcp_options = case argument.buffer_size {
       option.Some(bytes) -> [socket.Buffer(bytes), ..tcp_options]
       option.None -> tcp_options
+    }
+
+    let tcp_options = case argument.ipv6 {
+      True -> [
+        socket.Family(socket.Inet6),
+        socket.Ipv6Only(True),
+        ..tcp_options
+      ]
+      False -> tcp_options
     }
 
     let listen = case argument.tls {
