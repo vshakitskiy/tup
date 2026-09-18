@@ -1,7 +1,7 @@
 name = "tup"
-version = "1.0.0"
+version = "1.0.0-rc1"
 
-# description = ""
+description = "acceptor pool using relay supervisor"
 licences = ["Apache-2.0"]
 repository = { type = "github", user = "vshakitskiy", repo = "tup" }
 #
