@@ -47,6 +47,10 @@ pub fn terminate_child(supervisor: process.Pid, id: Int) -> Result(Nil, Nil)
 @external(erlang, "tup_ffi", "restart_child")
 pub fn restart_child(supervisor: process.Pid, id: Int) -> Result(Nil, Nil)
 
+/// Stop the supervisor and everything under it.
+@external(erlang, "tup_ffi", "stop_supervisor")
+pub fn stop(supervisor: process.Pid) -> Nil
+
 /// How many children are alive.
 @external(erlang, "tup_ffi", "active_children")
 pub fn active_children(supervisor: process.Pid) -> Result(Int, Nil)

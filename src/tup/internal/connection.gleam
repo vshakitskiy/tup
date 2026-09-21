@@ -45,6 +45,7 @@ pub type Argument(user_state, user_message) {
     socket: socket.Socket,
     acceptor: process.Pid,
     active_state: socket.ActiveState,
+    handshake_timeout: socket.Timeout,
     handlers: Handlers(user_state, user_message),
   )
 }
@@ -117,6 +118,7 @@ type State(user_state, user_message) {
     self: process.Subject(Message(user_message)),
     init_selector: process.Selector(Message(user_message)),
     active_state: socket.ActiveState,
+    handshake_timeout: socket.Timeout,
     handlers: Handlers(user_state, user_message),
     monitor: process.Monitor,
   )
@@ -135,8 +137,14 @@ pub fn start_worker(argument: Argument(user_state, user_message)) {
   actor.new_with_initialiser(1000, fn(self) {
     process.trap_exits(True)
 
-    let Argument(transport:, socket:, acceptor:, active_state:, handlers:) =
-      argument
+    let Argument(
+      transport:,
+      socket:,
+      acceptor:,
+      active_state:,
+      handshake_timeout:,
+      handlers:,
+    ) = argument
     let monitor = process.monitor(acceptor)
 
     let selector =
@@ -151,6 +159,7 @@ pub fn start_worker(argument: Argument(user_state, user_message)) {
       socket:,
       parent: parent(),
       active_state:,
+      handshake_timeout:,
       self:,
       init_selector: selector,
       handlers:,
@@ -168,6 +177,7 @@ pub fn start_worker(argument: Argument(user_state, user_message)) {
         socket:,
         parent:,
         active_state:,
+        handshake_timeout:,
         self:,
         init_selector:,
         handlers:,
@@ -177,7 +187,7 @@ pub fn start_worker(argument: Argument(user_state, user_message)) {
       -> {
         process.demonitor_process(monitor:)
 
-        case socket.handshake(transport, socket, socket.Milliseconds(10_000)) {
+        case socket.handshake(transport, socket, handshake_timeout) {
           Ok(socket) -> {
             let local = socket.sockname(transport, socket)
             let peer = socket.peername(transport, socket)
@@ -191,7 +201,7 @@ pub fn start_worker(argument: Argument(user_state, user_message)) {
 
                 let selector =
                   process.map_selector(user_selector, User)
-                  |> process.merge_selector(init_selector)
+                  |> process.merge_selector(init_selector, _)
 
                 Acknowledged(
                   connection:,
@@ -413,7 +423,7 @@ fn handle_next(
       case user_selector {
         option.Some(user_selector) -> {
           process.map_selector(user_selector, User)
-          |> process.merge_selector(selector)
+          |> process.merge_selector(selector, _)
           |> actor.with_selector(next, _)
         }
         option.None -> next

@@ -25,7 +25,9 @@
 ////       "tls",
 ////       "verifying_clients",
 ////       "with_alpn",
-////       "session_tickets"
+////       "session_tickets",
+////       "handshake_timeout",
+////       "infinite_handshake_timeout"
 ////     ]
 ////   },
 ////   {
@@ -349,6 +351,10 @@ pub fn continue(state: user_state) {
 /// Sets the selector the connection receives user messages on from now on. Has 
 /// no effect on a stop.
 ///
+/// Where this selector handles a message the connection would otherwise handle
+/// itself, the selector wins. Selecting trapped exits, for example, hands the
+/// exits of linked processes and of the connection supervisor to the handler.
+///
 /// ```gleam
 /// let selector =
 ///   process.new_selector()
@@ -572,8 +578,7 @@ pub fn infinite_shutdown_timeout(builder: Builder(user_state, user_message)) {
 /// 9 KB.
 ///
 /// A larger buffer means fewer and bigger `Incoming` messages which pays off 
-/// when clients send a lot of data. It costs the memory on every connection
-/// so provide careful values.
+/// when clients send a lot of data. Idle connections do not hold it.
 ///
 /// ```gleam
 /// builder
@@ -675,15 +680,20 @@ pub fn active_state(
 }
 
 /// TLS settings for the server. Create them with `tls` and refine them with
-/// `verifying_clients`, `with_alpn` and `session_tickets`.
+/// `verifying_clients`, `with_alpn`, `session_tickets` and
+/// `handshake_timeout`.
 pub opaque type Tls {
   Tls(
     certificate: Certificate,
     client_certificates: option.Option(ClientCertificates),
     alpn: List(String),
     session_tickets: TicketMode,
+    handshake_timeout: socket.Timeout,
   )
 }
+
+/// How long a connection waits for the TLS handshake.
+const default_handshake_timeout = socket.Milliseconds(10_000)
 
 /// Where the server's certificate chain and private key come from. Every
 /// source must hold at least one certificate.
@@ -722,10 +732,11 @@ fn to_internal_key(key: TlsPrivateKey) -> socket.PrivateKey {
   }
 }
 
-/// Creates TLS settings around `certificate`. By default the clients are not 
-/// asked for a certificate, no ALPN protocols are offered and session tickets 
-/// are stateless. Every TLS server speaks TLS 1.2 and 1.3, applies its own 
-/// cipher order and refuses client renegotiation.
+/// Creates TLS settings around `certificate`. By default the clients are not
+/// asked for a certificate, no ALPN protocols are offered, session tickets
+/// are stateless and a handshake has 10 seconds to finish. Every TLS server
+/// speaks TLS 1.2 and 1.3, applies its own cipher order and refuses client
+/// renegotiation.
 ///
 /// ```gleam
 /// tup.tls(tup.Disk(cert: "priv/cert.pem", key: "priv/key.pem"))
@@ -736,6 +747,7 @@ pub fn tls(certificate: Certificate) {
     client_certificates: option.None,
     alpn: [],
     session_tickets: Stateless,
+    handshake_timeout: default_handshake_timeout,
   )
 }
 
@@ -813,6 +825,28 @@ pub fn session_tickets(tls: Tls, mode: TicketMode) {
   Tls(..tls, session_tickets: mode)
 }
 
+/// Sets how long a connection waits for the handshake to finish before it is
+/// closed. Defaults to 10 seconds. Must not be negative.
+///
+/// ```gleam
+/// tls(certificate)
+/// |> tup.handshake_timeout(5000)
+/// ```
+pub fn handshake_timeout(tls: Tls, milliseconds: Int) {
+  Tls(..tls, handshake_timeout: socket.Milliseconds(milliseconds))
+}
+
+/// Lets a handshake take as long as it takes. A client that never finishes
+/// one then holds its connection worker until it disconnects.
+///
+/// ```gleam
+/// tls(certificate)
+/// |> tup.infinite_handshake_timeout
+/// ```
+pub fn infinite_handshake_timeout(tls: Tls) {
+  Tls(..tls, handshake_timeout: socket.Never)
+}
+
 /// Wraps every connection in TLS with the given settings.
 ///
 /// ```gleam
@@ -839,20 +873,15 @@ pub fn named(
   Builder(..builder, name: option.Some(name))
 }
 
-/// The endpoint the named server listens on, with the port the system picked
-/// when the server was started on port 0. Waits up to `timeout` milliseconds
-/// for the listener to answer.
+/// The endpoint the named server listens on right now. Waits up to `timeout`
+/// milliseconds for the listener to answer.
 ///
 /// Returns `Error(Nil)` when no server runs under `name`, when it is suspended 
 /// or when the listener does not answer in time.
 ///
 /// ```gleam
-/// let name = process.new_name("tup")
-/// let assert Ok(_started) =
-///   builder
-///   |> tup.listening(on: Tcp(interface: "127.0.0.1", port: 0))
-///   |> tup.named(name)
-///   |> tup.start
+/// let assert Ok(Nil) = tup.suspend(name)
+/// let assert Ok(Nil) = tup.resume(name)
 ///
 /// tup.listen_endpoint(name, within: 1000)
 /// // -> Ok(TcpEndpoint(Ipv4(127, 0, 0, 1), 54321))
@@ -862,6 +891,11 @@ pub fn listen_endpoint(
   within timeout: Int,
 ) -> Result(Endpoint, Nil) {
   use root <- result.try(process.named(name))
+  root_endpoint(root, timeout)
+}
+
+/// Asks the listener under the root supervisor `root` for its endpoint.
+fn root_endpoint(root: process.Pid, timeout: Int) -> Result(Endpoint, Nil) {
   use pool <- result.try(tree.child(root, tree.acceptor_pool))
   use listener <- result.try(tree.child(pool, tree.listener))
   listener.endpoint(listener, timeout)
@@ -928,7 +962,9 @@ pub fn supervised(builder: Builder(user_state, user_message)) {
   start(builder)
 }
 
-/// Starts the server linked to the calling process.
+/// Starts the server linked to the calling process. The started data is the
+/// endpoint it listens on with the port the system picked when the server was
+/// started on port 0.
 ///
 /// Fails with `actor.InitFailed` when a setting is out of range, a
 /// certificate, key or trust store cannot be read or holds nothing, an ALPN
@@ -937,8 +973,13 @@ pub fn supervised(builder: Builder(user_state, user_message)) {
 /// crashing the caller.
 ///
 /// ```gleam
-/// let assert Ok(_started) = tup.start(builder)
-/// process.sleep_forever()
+/// let assert Ok(actor.Started(data: endpoint, ..)) =
+///   builder
+///   |> tup.listening(on: Tcp(interface: "127.0.0.1", port: 0))
+///   |> tup.start
+///
+/// endpoint
+/// // -> TcpEndpoint(Ipv4(127, 0, 0, 1), 54321)
 /// ```
 pub fn start(builder: Builder(user_state, user_message)) {
   let Builder(
@@ -969,10 +1010,12 @@ pub fn start(builder: Builder(user_state, user_message)) {
       Ok(listener.Unix(path:))
     }
   })
+  use handshake_timeout <- try_handshake_timeout(tls)
   use tls <- try_tls(tls)
 
   let listener_argument = listener.Argument(address:, tls:, buffer_size:, ipv6:)
-  let pool_argument = pool.Argument(pool_size:, active_state:, handlers:)
+  let pool_argument =
+    pool.Argument(pool_size:, active_state:, handshake_timeout:, handlers:)
 
   use <- try_name(name)
 
@@ -1053,6 +1096,19 @@ pub fn start(builder: Builder(user_state, user_message)) {
     |> pool.add_child(listener_argument, pool_argument)
   })
   |> relay.start
+  |> result.try(fn(started) {
+    let actor.Started(pid:, ..) = started
+
+    case root_endpoint(pid, 1000) {
+      Ok(endpoint) -> Ok(actor.Started(pid:, data: endpoint))
+      Error(Nil) -> {
+        tree.stop(pid)
+        Error(actor.InitFailed(
+          "The listener stopped before reporting the endpoint it listens on.",
+        ))
+      }
+    }
+  })
 }
 
 /// Run `start` with exits trapped. The main reason why is so a server that 
@@ -1070,6 +1126,23 @@ fn try_buffer_size(
     option.Some(bytes) if bytes <= 0 ->
       Error(actor.InitFailed("Provided buffer size is negative or equals to 0."))
     buffer_size -> callback(buffer_size)
+  }
+}
+
+/// Rejects a negative handshake timeout.
+fn try_handshake_timeout(
+  tls: option.Option(Tls),
+  callback: fn(socket.Timeout) -> Result(a, actor.StartError),
+) -> Result(a, actor.StartError) {
+  case tls {
+    option.Some(Tls(handshake_timeout: socket.Milliseconds(milliseconds), ..))
+      if milliseconds < 0
+    ->
+      Error(actor.InitFailed(
+        "Provided handshake timeout is negative. Use infinite_handshake_timeout to wait for the handshake without a limit.",
+      ))
+    option.Some(Tls(handshake_timeout:, ..)) -> callback(handshake_timeout)
+    option.None -> callback(default_handshake_timeout)
   }
 }
 
@@ -1187,7 +1260,13 @@ fn try_tls(
     Result(a, actor.StartError),
 ) {
   case tls {
-    option.Some(Tls(certificate:, client_certificates:, alpn:, session_tickets:)) -> {
+    option.Some(Tls(
+      certificate:,
+      client_certificates:,
+      alpn:,
+      session_tickets:,
+      ..,
+    )) -> {
       use certificate <- try_certificate(certificate)
       use client_certificates <- try_client_certificates(client_certificates)
       use alpn <- try_alpn(alpn)

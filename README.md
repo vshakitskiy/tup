@@ -79,6 +79,19 @@ pub fn main() {
 `Tcp("0.0.0.0", 0)`, lets the system pick a free port. The default is
 `Tcp("127.0.0.1", 3000)`.
 
+[`tup.start`](https://hexdocs.pm/tup/tup.html#start) hands back the endpoint the
+server listens on.
+
+```gleam
+let assert Ok(actor.Started(data: endpoint, ..)) =
+  tup.new(on_init:, handler:, on_close:)
+  |> tup.listening(on: tup.Tcp("127.0.0.1", 0))
+  |> tup.start
+
+tup.endpoint_to_string(endpoint)
+// -> "127.0.0.1:54321"
+```
+
 [`tup.pool_size`](https://hexdocs.pm/tup/tup.html#pool_size) sets how many
 acceptors wait for connections at the same time. The default is 20.
 
@@ -187,7 +200,14 @@ controls how session resumption tickets are handled.
 tup.tls(tup.Disk("priv/localhost.crt", "priv/localhost.key"))
 |> tup.verifying_clients(tup.Required(trusting: tup.TrustDisk("priv/ca.crt")))
 |> tup.with_alpn(["h2", "http/1.1"])
+|> tup.handshake_timeout(5000)
 ```
+
+A handshake has 10 seconds to finish before the connection is closed.
+[`tup.handshake_timeout`](https://hexdocs.pm/tup/tup.html#handshake_timeout)
+changes that and
+[`tup.infinite_handshake_timeout`](https://hexdocs.pm/tup/tup.html#infinite_handshake_timeout)
+removes the limit.
 
 <h3 id="unix-sockets">Unix Sockets</h3>
 
@@ -278,19 +298,21 @@ let assert Ok(_started) =
   |> tup.listening(on: tup.Tcp("0.0.0.0", 0))
   |> tup.start
 
-// The port the system picked.
-let assert Ok(endpoint) = tup.listen_endpoint(name, within: 1000)
-
 // Stop accepting and close the listen socket, leaving open connections running.
 let assert Ok(Nil) = tup.suspend(name)
 let assert Ok(open) = tup.connection_count(name)
 
 // Start accepting again.
 let assert Ok(Nil) = tup.resume(name)
+
+// Where it listens now.
+let assert Ok(endpoint) = tup.listen_endpoint(name, within: 1000)
 ```
 
 If the server was bound to port 0,
-[`tup.resume`](https://hexdocs.pm/tup/tup.html#resume) binds to a new port.
+[`tup.resume`](https://hexdocs.pm/tup/tup.html#resume) binds to a new port, use 
+[`tup.listen_endpoint`](https://hexdocs.pm/tup/tup.html#listen_endpoint) to find 
+the new port.
 
 <h3 id="memory-and-throughput">Memory and Throughput</h3>
 

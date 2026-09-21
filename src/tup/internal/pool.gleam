@@ -52,6 +52,7 @@ pub type Argument(user_state, user_message) {
   Argument(
     pool_size: Int,
     active_state: socket.ActiveState,
+    handshake_timeout: socket.Timeout,
     handlers: connection.Handlers(user_state, user_message),
   )
 }
@@ -110,6 +111,7 @@ type State(user_state, user_message) {
       process.Subject(connection.Message(user_message)),
     ),
     active_state: socket.ActiveState,
+    handshake_timeout: socket.Timeout,
     pid: process.Pid,
     self: process.Subject(Message),
     handlers: connection.Handlers(user_state, user_message),
@@ -128,13 +130,14 @@ fn start_acceptor(
     process.send(self, Accept)
 
     let listener.Relayed(transport:, socket:) = relayed
-    let Argument(active_state:, handlers:, ..) = argument
+    let Argument(active_state:, handshake_timeout:, handlers:, ..) = argument
 
     State(
       transport:,
       socket:,
       factory:,
       active_state:,
+      handshake_timeout:,
       pid: process.self(),
       self:,
       handlers:,
@@ -144,8 +147,16 @@ fn start_acceptor(
     |> Ok
   })
   |> actor.on_message(fn(state, _message) {
-    let State(transport:, socket:, factory:, active_state:, pid:, handlers:, ..) =
-      state
+    let State(
+      transport:,
+      socket:,
+      factory:,
+      active_state:,
+      handshake_timeout:,
+      pid:,
+      handlers:,
+      ..,
+    ) = state
 
     case socket.accept(transport, socket, socket.Milliseconds(30_000)) {
       Ok(socket) -> {
@@ -155,6 +166,7 @@ fn start_acceptor(
             socket:,
             acceptor: pid,
             active_state:,
+            handshake_timeout:,
             handlers:,
           )
         case factory.start_child(factory, argument) {

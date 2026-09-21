@@ -1,5 +1,5 @@
 name = "tup"
-version = "1.0.0-rc1"
+version = "1.0.0"
 
 description = "acceptor pool using relay supervisor"
 licences = ["Apache-2.0"]

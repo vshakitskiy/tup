@@ -4,7 +4,7 @@
 
 -export([parent/0, exit_with/1, gleam_error/1, erlang_term_to_string/1, parse_address/1, unlink_stale_socket/1, read_file/1,
          child_pid/2, terminate_child/2, restart_child/2, active_children/1,
-         trapping_exits/1]).
+         stop_supervisor/1, trapping_exits/1]).
 
 parent() -> 
   {parent, Pid} = erlang:process_info(self(), parent), 
@@ -107,6 +107,13 @@ active_children(Supervisor) ->
     Counts -> {ok, proplists:get_value(active, Counts, 0)}
   catch
     exit:_Reason -> {error, nil}
+  end.
+
+stop_supervisor(Supervisor) ->
+  try gen_server:stop(Supervisor) of
+    ok -> nil
+  catch
+    exit:_Reason -> nil
   end.
 
 trapping_exits(Start) ->
